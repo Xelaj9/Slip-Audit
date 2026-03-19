@@ -1368,7 +1368,7 @@ ${adminData}
 - match_receiver: true ถ้าชื่อผู้รับในสลิปตรงกับชื่อในบัญชีปลายทาง หรือเลขบัญชีตรงกัน
 - ถ้าอ่านข้อมูลใดไม่ได้ชัดเจน ให้ slip_xxx เป็น null และ match_xxx เป็น null`;
 
-  const resp=await fetch('https://api.anthropic.com/v1/messages',{
+  const resp=await fetch('/api/claude',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -1486,7 +1486,7 @@ async function callAIForSlip(t,slip){
     imageContent={type:'image',source:{type:'url',url:src}};
   }
   const prompt=`คุณคือระบบตรวจสอบสลิปธนาคาร กรุณาอ่านข้อมูลจากสลิปโอนเงินในภาพ แล้วตอบกลับเป็น JSON เท่านั้น (ไม่ต้องมี markdown หรือคำอธิบาย):\n\n{"date":"DD/MM/YYYY","time":"HH:MM","amount":0.00,"sender":"ชื่อผู้โอน","receiver":"ชื่อผู้รับ","bank":"ชื่อธนาคาร","ref":"เลขอ้างอิง","notes":"ข้อสังเกต"}\n\nหมายเหตุ: date ใส่เป็น DD/MM/YYYY (ปี ค.ศ.) · time ใส่เป็น HH:MM (24 ชม.) · amount ใส่ตัวเลข · ถ้าไม่เห็นข้อมูลใด ใส่ null`;
-  const resp=await fetch('https://api.anthropic.com/v1/messages',{
+  const resp=await fetch('/api/claude',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:[imageContent,{type:'text',text:prompt}]}]})
