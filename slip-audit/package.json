@@ -1,0 +1,9 @@
+{
+  "name": "slip-audit",
+  "version": "1.0.0",
+  "description": "Admin Slip Audit System",
+  "private": true,
+  "engines": {
+    "node": "18.x"
+  }
+}
