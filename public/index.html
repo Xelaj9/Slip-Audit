@@ -1230,9 +1230,10 @@ async function batchAiVerify(){
   const footStat=document.getElementById('ai-foot-stat');
   fill.style.width='0%'; label.textContent=''; count.textContent='';
   let done=0,passed=0,failed=0,errs=0;
-  const BATCH=3;
-  for(let i=0;i<targets.length;i+=BATCH){
-    const batch=targets.slice(i,i+BATCH);
+  // Process one at a time to avoid 429 rate limiting
+  // Claude API: ~50 req/min on standard tier
+  for(let i=0;i<targets.length;i++){
+    const batch=[targets[i]];
     await Promise.all(batch.map(async t=>{
       const slip=getLinked(t.id);
       const log=document.getElementById('ai-log');
@@ -1262,6 +1263,8 @@ async function batchAiVerify(){
       footStat.innerHTML='<span style="color:var(--green)">✅ ผ่าน '+passed+'</span> &nbsp; <span style="color:var(--red)">❌ ผิดปกติ '+failed+'</span>'+(errs?' &nbsp; <span style="color:var(--muted)">⚠️ error '+errs+'</span>':'');
     }));
     saveLS(); renderTable(); updateStats();
+    // Delay between requests to stay within rate limits (~1 req/sec)
+    if(i < targets.length-1) await new Promise(r=>setTimeout(r,1200));
   }
   _batchRunning=false;
   aiPanelDone();
@@ -1368,19 +1371,53 @@ ${adminData}
 - match_receiver: true ถ้าชื่อผู้รับในสลิปตรงกับชื่อในบัญชีปลายทาง หรือเลขบัญชีตรงกัน
 - ถ้าอ่านข้อมูลใดไม่ได้ชัดเจน ให้ slip_xxx เป็น null และ match_xxx เป็น null`;
 
-  const resp=await fetch('/api/claude',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      model:'claude-sonnet-4-20250514',
-      max_tokens:600,
-      messages:[{role:'user',content:[imageContent,{type:'text',text:prompt}]}]
-    })
-  });
-  if(!resp.ok) throw new Error('API '+resp.status);
-  const data=await resp.json();
-  const raw=(data.content||[]).find(c=>c.type==='text')?.text||'';
-  return JSON.parse(raw.replace(/```json|```/g,'').trim());
+  // Retry with exponential backoff — handles 429 (rate limit) automatically
+  const MAX_RETRIES=4;
+  let lastErr;
+  for(let attempt=0;attempt<MAX_RETRIES;attempt++){
+    if(attempt>0){
+      const delay=attempt===1?2000:attempt===2?5000:10000;
+      await new Promise(r=>setTimeout(r,delay));
+    }
+    let resp;
+    try{
+      resp=await fetch('/api/claude',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-20250514',
+          max_tokens:600,
+          messages:[{role:'user',content:[imageContent,{type:'text',text:prompt}]}]
+        })
+      });
+    }catch(fetchErr){
+      lastErr=fetchErr;
+      continue; // network error — retry
+    }
+    if(resp.status===429){
+      // Rate limited — wait longer and retry
+      const retryAfter=parseInt(resp.headers.get('retry-after')||'0')*1000||5000;
+      await new Promise(r=>setTimeout(r,retryAfter));
+      lastErr=new Error('Rate limit (429)');
+      continue;
+    }
+    if(resp.status===400){
+      // Bad request — usually image URL that Anthropic can't access
+      // Try falling back to URL-only mode or skip image
+      const errData=await resp.json().catch(()=>({}));
+      throw new Error('400: '+(errData?.error?.message||'Bad request — อาจโหลดรูปไม่ได้'));
+    }
+    if(!resp.ok){
+      const errData=await resp.json().catch(()=>({}));
+      lastErr=new Error('API '+(resp.status)+': '+(errData?.error?.message||''));
+      if(resp.status>=500) continue; // server error — retry
+      throw lastErr; // 4xx other than 429/400 — don't retry
+    }
+    const data=await resp.json();
+    const raw=(data.content||[]).find(c=>c.type==='text')?.text||'';
+    return JSON.parse(raw.replace(/```json|```/g,'').trim());
+  }
+  throw lastErr||new Error('API ไม่ตอบสนองหลังลอง '+MAX_RETRIES+' ครั้ง');
 }
 
 function applyAiResult(id,t,parsed){
