@@ -1230,10 +1230,10 @@ async function batchAiVerify(){
   const footStat=document.getElementById('ai-foot-stat');
   fill.style.width='0%'; label.textContent=''; count.textContent='';
   let done=0,passed=0,failed=0,errs=0;
-  // Process one at a time to avoid 429 rate limiting
-  // Claude API: ~50 req/min on standard tier
-  for(let i=0;i<targets.length;i++){
-    const batch=[targets[i]];
+  // Tier 2: 1000 req/min — run 5 concurrent requests
+  const BATCH_SIZE=5;
+  for(let i=0;i<targets.length;i+=BATCH_SIZE){
+    const batch=targets.slice(i,i+BATCH_SIZE);
     await Promise.all(batch.map(async t=>{
       const slip=getLinked(t.id);
       const log=document.getElementById('ai-log');
@@ -1264,7 +1264,7 @@ async function batchAiVerify(){
     }));
     saveLS(); renderTable(); updateStats();
     // Delay between requests to stay within rate limits (~1 req/sec)
-    if(i < targets.length-1) await new Promise(r=>setTimeout(r,1200));
+    if(i+BATCH_SIZE < targets.length) await new Promise(r=>setTimeout(r,100));
   }
   _batchRunning=false;
   aiPanelDone();
