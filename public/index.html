@@ -1939,16 +1939,36 @@ async function pollBatchResult(){
   }
 }
 
-// Restore batch state on page load
+// Restore batch state on page load — check silently in background
 function restoreBatchState(){
   const saved = localStorage.getItem('a3_batch');
   if(!saved) return;
-  const state = JSON.parse(saved);
-  _currentBatchId = state.batchId;
-  _batchTxMap = state.txMap;
-  showBatchBar(state.batchId, 'processing', state.count);
-  // Auto-check status
-  setTimeout(()=>checkBatchStatus(false), 2000);
+  try{
+    const state = JSON.parse(saved);
+    const submitted = new Date(state.submittedAt);
+    const age = (Date.now() - submitted.getTime()) / 1000 / 60; // minutes
+    // Ignore batches older than 3 hours (they've expired or been collected)
+    if(age > 180){ localStorage.removeItem('a3_batch'); return; }
+    _currentBatchId = state.batchId;
+    _batchTxMap = state.txMap || {};
+    // Don't auto-show bar — just check silently, show only if still processing or done
+    setTimeout(async ()=>{
+      try{
+        const resp = await fetch('/api/batch-status?batch_id='+encodeURIComponent(state.batchId));
+        if(!resp.ok){ localStorage.removeItem('a3_batch'); return; }
+        const data = await resp.json();
+        if(data.processing_status === 'ended'){
+          showBatchBar(state.batchId, 'ended', state.count);
+          showToast('🎉 Batch เสร็จแล้ว! กด "โหลดผล" ได้เลย');
+        } else if(data.processing_status === 'in_progress' || data.processing_status === 'processing'){
+          showBatchBar(state.batchId, 'processing', state.count);
+        } else {
+          // canceling / canceled / expired
+          localStorage.removeItem('a3_batch');
+        }
+      }catch(e){ /* network error — ignore silently */ }
+    }, 3000);
+  }catch(e){ localStorage.removeItem('a3_batch'); }
 }
 
 init();
