@@ -225,15 +225,11 @@ input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:po
     </select>
     <select class="field" id="q-field" onchange="renderTable()" title="กรองตามหัวข้อที่ผิด">
       <option value="">ทุกหัวข้อ</option>
-      <option value="date_fail">📅 วันที่ — ผิด</option>
       <option value="time_fail">🕐 เวลา — ผิด</option>
       <option value="amt_fail">💰 จำนวน — ผิด</option>
-      <option value="send_fail">👤 ผู้โอน — ผิด</option>
       <option value="recv_fail">🏦 ผู้รับ — ผิด</option>
-      <option value="date_ok">📅 วันที่ — ผ่าน</option>
       <option value="time_ok">🕐 เวลา — ผ่าน</option>
       <option value="amt_ok">💰 จำนวน — ผ่าน</option>
-      <option value="send_ok">👤 ผู้โอน — ผ่าน</option>
       <option value="recv_ok">🏦 ผู้รับ — ผ่าน</option>
     </select>
     <input type="date" class="field" id="q-date" onchange="renderTable()">
@@ -864,7 +860,7 @@ function renderPagi(tot){
 function goPage(p){page=p;renderTable();}
 function getStatus(id){
   const c=chks[id];if(!c) return'pending';
-  const vs=['date','time','amt','send','recv'].map(f=>c[f]).filter(v=>v!==undefined);
+  const vs=['time','amt','recv'].map(f=>c[f]).filter(v=>v!==undefined);
   if(!vs.length) return'pending';
   if(vs.every(r=>r==='ok')) return'ok';
   if(vs.some(r=>r==='fail')) return vs.some(r=>r==='ok')?'partial':'fail';
@@ -1205,7 +1201,7 @@ async function aiVerify(){
     document.getElementById('cs-recv').textContent=c.sRecv||'—';
     ['date','time','amt','send','recv'].forEach(f=>restoreChk(f,c[f]));
     updateSummary(); renderTable();
-    const fails=['date','time','amt','send','recv'].filter(f=>c[f]==='fail').map(f=>({date:'วันที่',time:'เวลา',amt:'จำนวน',send:'ผู้โอน',recv:'ผู้รับ'})[f]);
+    const fails=['time','amt','recv'].filter(f=>c[f]==='fail').map(f=>({time:'เวลา',amt:'จำนวน',recv:'ผู้รับ'})[f]);
     const mismatch=parsed.mismatch_details?`<br><span style="color:var(--red);font-size:10px">⚠️ ${parsed.mismatch_details}</span>`:'';
     const res=fails.length?`<span style="color:var(--red)">❌ ไม่ตรง: ${fails.join(', ')}</span>`:`<span style="color:var(--green)">✅ ผ่านทุกรายการ</span>`;
     statusBox.innerHTML=`${res}<div style="margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11px">
@@ -1276,7 +1272,7 @@ async function batchAiVerify(){
         applyAiResult(t.id,t,result);
         const st=getStatus(t.id);
         done++; if(st==='ok') passed++; else failed++;
-        const fails=['date','time','amt','send','recv'].filter(f=>chks[t.id]&&chks[t.id][f]==='fail')
+        const fails=['time','amt','recv'].filter(f=>chks[t.id]&&chks[t.id][f]==='fail')
           .map(f=>({date:'วันที่',time:'เวลา',amt:'จำนวน',send:'ผู้โอน',recv:'ผู้รับ'})[f]);
         const ic=st==='ok'?'✅':st==='fail'?'❌':'⚠️';
         const failTxt=fails.length?' <span style="color:var(--red);font-size:10px;margin-left:4px">✗ '+fails.join(' | ')+'</span>':'';
@@ -1464,7 +1460,7 @@ function applyAiResult(id,t,parsed){
 
   // Apply match results — AI already compared, trust its judgment
   function ac(f,match){ if(match!==null&&match!==undefined) chk[f]=match?'ok':'fail'; }
-  ac('date',  parsed.match_date);
+  // date: not checked (พ.ศ./ค.ศ. ambiguity)
   ac('time',  parsed.match_time);
   ac('amt',   parsed.match_amount);
   ac('recv',  parsed.match_receiver);
@@ -1492,7 +1488,7 @@ async function batchAIVerify(){
     const slip=getLinked(t.id);
     if(!slip) return false;
     const chk=chks[t.id];
-    const hasCheck=chk&&['date','time','amt','send','recv'].some(f=>chk[f]!==undefined);
+    const hasCheck=chk&&['time','amt','recv'].some(f=>chk[f]!==undefined);
     return !hasCheck;
   });
   if(!targets.length){ showToast('ไม่มีรายการที่ต้องตรวจ (ทุกรายการตรวจแล้ว หรือไม่มีสลิป)','info'); return; }
@@ -1522,8 +1518,8 @@ async function batchAIVerify(){
       const parsed=await callAIForSlip(t,slip);
       applyAIResult(t.id,parsed);
       ok++;
-      const flags=['date','time','amt','send','recv'].filter(f=>chks[t.id]&&chks[t.id][f]==='fail');
-      const resultStr=flags.length?`❌ ผิด: ${flags.map(f=>({date:'วันที่',time:'เวลา',amt:'จำนวน',send:'ผู้โอน',recv:'ผู้รับ'})[f]).join(',')}` : '✅ ผ่าน';
+      const flags=['time','amt','recv'].filter(f=>chks[t.id]&&chks[t.id][f]==='fail');
+      const resultStr=flags.length?`❌ ผิด: ${flags.map(f=>({time:'เวลา',amt:'จำนวน',recv:'ผู้รับ'})[f]).join(',')}` : '✅ ผ่าน';
       li.innerHTML=`<span class="${flags.length?'plog-fail':'plog-ok'}">${flags.length?'✗':'✓'}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:${flags.length?'var(--red)':'var(--green)'}">${esc(t.time)} ${esc(t.admin)} — ${resultStr}</span>`;
     }catch(err){
       fail++;
@@ -1580,7 +1576,7 @@ function applyAIResult(txId,parsed){
   const aT=t.time.split(' ')[1]||'';
   const aA=parseFloat(t.amount);
   function ac(f,match){ if(match!==null) c[f]=match?'ok':'fail'; }
-  ac('date', parsed.date!=null ? parsed.date===aD : null);
+  // date: ไม่นับในผลเปรียบเทียบ
   ac('time', parsed.time!=null ? parsed.time===aT : null);
   ac('amt',  parsed.amount!=null ? Math.abs(parsed.amount-aA)<0.01 : null);
   // sender: manual (no admin data to compare)
@@ -1595,7 +1591,7 @@ function applyAIResult(txId,parsed){
 }
 function collectVerify(id){
   if(!chks[id]) chks[id]={};
-  ['date','time','amt','send','recv'].forEach(f=>{const v=getChk(f);if(v!==undefined)chks[id][f]=v;else delete chks[id][f];});
+  ['time','amt','recv'].forEach(f=>{const v=getChk(f);if(v!==undefined)chks[id][f]=v;else delete chks[id][f];});
   chks[id].sDate=document.getElementById('s-date').value;chks[id].sTime=document.getElementById('s-time').value;
   chks[id].sAmt=document.getElementById('s-amt').value;chks[id].sSender=document.getElementById('s-sender').value;
   chks[id].sRecv=document.getElementById('s-recv').value;chks[id].note=document.getElementById('vfy-note').value;
@@ -1630,7 +1626,7 @@ function renderExport(){
             <th style="padding:6px 13px;font-size:9px;color:var(--text2);font-family:var(--mono)">หมายเหตุ</th>
           </tr></thead><tbody>${dtxs.map(t=>{
             const chk=chks[t.id]||{};
-            const fail=['date','time','amt','send','recv'].filter(f=>chk[f]==='fail').map(f=>({date:'วันที่',time:'เวลา',amt:'จำนวน',send:'ผู้โอน',recv:'ผู้รับ'})[f]).join(' / ');
+            const fail=['time','amt','recv'].filter(f=>chk[f]==='fail').map(f=>({time:'เวลา',amt:'จำนวน',recv:'ผู้รับ'})[f]).join(' / ');
             const isSel=selRows.has(t.id),slip=getLinked(t.id);
             return `<tr style="border-bottom:1px solid var(--border)${isSel?';background:rgba(245,197,24,.04)':''}">
               <td style="padding:6px 13px"><input type="checkbox" ${isSel?'checked':''} onchange="toggleRow(${JSON.stringify(t.id)},this)"></td>
@@ -1662,7 +1658,7 @@ function buildCSV(list,adm){
     body+=`"--- ${date} (${dtxs.length}) ---"\n`;
     dtxs.forEach(t=>{
       const chk=chks[t.id]||{};
-      const fail=['date','time','amt','send','recv'].filter(f=>chk[f]==='fail').map(f=>({date:'วันที่',time:'เวลา',amt:'จำนวน',send:'ผู้โอน',recv:'ผู้รับ'})[f]).join(' | ');
+      const fail=['time','amt','recv'].filter(f=>chk[f]==='fail').map(f=>({time:'เวลา',amt:'จำนวน',recv:'ผู้รับ'})[f]).join(' | ');
       const slip=getLinked(t.id);
       let delay='';try{const pa=s=>{const[dt,ti]=s.split(' ');const[d,mo,y]=dt.split('/').map(Number);const[h,mi,sc]=(ti||'').split(':').map(Number);return new Date(y,mo-1,d,h||0,mi||0,sc||0);};if(t.time&&t.adminTime) delay=String(Math.round((pa(t.adminTime)-pa(t.time))/60000));}catch(e){}
       body+=[t.time,t.adminTime||'',delay,t.account,t.amount,t.admin,getStatus(t.id),
@@ -1776,7 +1772,6 @@ ${adminData}
 
 กฎการตรวจสอบ (เข้มงวดที่สุด):
 - slip_date: แปลงปีในสลิปเป็น ค.ศ. ก่อนเสมอ (ถ้าปี > 2400 แสดงว่าเป็น พ.ศ. ให้ลบ 543)
-- match_date: true เฉพาะเมื่อ วัน/เดือน/ปี(ค.ศ.) ตรงกันทุกตัว
 - match_time: true เฉพาะเมื่อ ชั่วโมงและนาที ตรงกันทุกตัว แม้ต่าง 1 นาทีก็ถือว่า false
 - match_amount: true เฉพาะเมื่อจำนวนเงินเท่ากันพอดี
 - match_receiver: true ถ้าชื่อผู้รับในสลิปตรงกับชื่อในบัญชีปลายทาง หรือเลขบัญชีตรงกัน
