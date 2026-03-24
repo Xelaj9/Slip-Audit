@@ -179,13 +179,14 @@ input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:po
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 </head>
 <body>
 <header class="header">
   <div class="logo">⬡ AUDIT SYS <span>v3.2 — รองรับ CSV + Excel (.xlsx)</span></div>
   <nav class="nav">
     <button class="nav-btn active" onclick="showView('transactions')">📋 รายการทั้งหมด</button>
-    <button class="nav-btn" onclick="showView('export')">📤 ส่งออก CSV</button>
+    <button class="nav-btn" onclick="showView('export')">📊 ส่งออก Excel</button>
     <button class="nav-btn" onclick="showView('settings')">⚙️ ตั้งค่า</button>
     <div style="width:1px;height:26px;background:var(--border2);margin:0 6px"></div>
     <span class="slip-chip" onclick="openGallery()" id="slip-chip">🖼 คลังสลิป 0 ไฟล์</span>
@@ -268,7 +269,7 @@ input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:po
 </div>
 
 <div id="view-export" class="view">
-  <div style="margin-bottom:18px"><h2 style="font-family:var(--mono);font-size:17px;color:var(--accent);margin-bottom:5px">📤 ส่งออก CSV หลักฐาน</h2><p style="color:var(--text2);font-size:12px">รายการผิดปกติ แยกไฟล์ตามแอดมิน แบ่งวันที่ชัดเจน</p></div>
+  <div style="margin-bottom:18px"><h2 style="font-family:var(--mono);font-size:17px;color:var(--accent);margin-bottom:5px">📊 ส่งออก Excel หลักฐาน</h2><p style="color:var(--text2);font-size:12px">รายการผิดปกติ ตาราง Excel จัดรูปแบบสวยงาม แยกไฟล์ตามแอดมิน</p></div>
   <div class="toolbar" style="margin-bottom:18px">
     <select class="field" id="exp-admin" onchange="renderExport()"><option value="">ทุกแอดมิน</option></select>
     <select class="field" id="exp-status" onchange="renderExport()">
@@ -1612,7 +1613,7 @@ function renderExport(){
   el.innerHTML=Object.entries(byAdm).map(([adm,atxs])=>{
     const byDate={};atxs.forEach(t=>{const d=t.time.split(' ')[0]||'?';if(!byDate[d]) byDate[d]=[];byDate[d].push(t);});
     return `<div class="admin-group">
-      <div class="ag-head"><div class="ag-name">👤 ${esc(adm)}</div><div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--mono);font-size:11px;color:var(--text2)">${atxs.length} รายการ</span><button class="btn btn-y btn-sm" onclick="exportOneAdmin('${esc(adm)}')">⬇ Export</button></div></div>
+      <div class="ag-head"><div class="ag-name">👤 ${esc(adm)}</div><div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--mono);font-size:11px;color:var(--text2)">${atxs.length} รายการ</span><button class="btn btn-y btn-sm" onclick="exportOneAdmin('${esc(adm)}')">⬇ Excel</button></div></div>
       <div class="ag-body">${Object.entries(byDate).map(([date,dtxs])=>`
         <div class="dg"><div class="dl">📅 ${date} — ${dtxs.length} รายการ</div>
           <table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--surface2)">
@@ -1648,32 +1649,235 @@ function toggleExpGrp(cb,adm,date){
   txs.filter(t=>t.admin===adm&&t.time.startsWith(date)&&sf.includes(getStatus(t.id))).forEach(t=>cb.checked?selRows.add(t.id):selRows.delete(t.id));
   saveLS();renderExport();
 }
-function buildCSV(list,adm){
-  const aud=document.getElementById('auditor')?.value||settings.auditorName||'',now=new Date();
-  let body=`"หลักฐานรายการผิดปกติ — แอดมิน: ${adm}"\n"วันที่รายงาน: ${fD(now)} ${now.toTimeString().slice(0,5)}"\n"ผู้ตรวจ: ${aud}"\n\n`;
-  const cols=['เวลาฝาก','เวลาแอดมินทำ','ล่าช้า(นาที)','บัญชีปลายทาง','จำนวนเงิน','แอดมิน','สถานะ','มีสลิป','slip_url','หัวข้อที่ผิด','สลิป-วันที่','สลิป-เวลา','สลิป-จำนวน','สลิป-ผู้โอน','สลิป-ผู้รับ','หมายเหตุ'];
-  const byDate={};list.forEach(t=>{const d=t.time.split(' ')[0]||'?';if(!byDate[d]) byDate[d]=[];byDate[d].push(t);});
-  body+=cols.map(c=>`"${c}"`).join(',')+'\n';
-  Object.entries(byDate).forEach(([date,dtxs])=>{
-    body+=`"--- ${date} (${dtxs.length}) ---"\n`;
-    dtxs.forEach(t=>{
-      const chk=chks[t.id]||{};
-      const fail=['time','amt','recv'].filter(f=>chk[f]==='fail').map(f=>({time:'เวลา',amt:'จำนวน',recv:'ผู้รับ'})[f]).join(' | ');
-      const slip=getLinked(t.id);
-      let delay='';try{const pa=s=>{const[dt,ti]=s.split(' ');const[d,mo,y]=dt.split('/').map(Number);const[h,mi,sc]=(ti||'').split(':').map(Number);return new Date(y,mo-1,d,h||0,mi||0,sc||0);};if(t.time&&t.adminTime) delay=String(Math.round((pa(t.adminTime)-pa(t.time))/60000));}catch(e){}
-      body+=[t.time,t.adminTime||'',delay,t.account,t.amount,t.admin,getStatus(t.id),
-        slip?(slip.type==='url'?'URL':'ไฟล์'):'ไม่มี',t.slipUrl||'',
-        fail,chk.sDate||'',chk.sTime||'',chk.sAmt||'',chk.sSender||'',chk.sRecv||'',chk.note||'']
-        .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')+'\n';
-    });
-  });
-  return body;
+// ── EXCEL EXPORT (ExcelJS) ──────────────────────────────────
+function calcDelay(t){
+  try{
+    const pa=s=>{const[dt,ti]=s.split(' ');const[d,mo,y]=dt.split('/').map(Number);const[h,mi,sc]=(ti||'').split(':').map(Number);return new Date(y,mo-1,d,h||0,mi||0,sc||0);};
+    if(t.time&&t.adminTime) return Math.round((pa(t.adminTime)-pa(t.time))/60000);
+  }catch(e){}
+  return '';
 }
-function dlCSV(content,fn){const blob=new Blob(['\uFEFF'+content],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);}
-function exportOneAdmin(adm){const sf=(document.getElementById('exp-status')?.value||'fail').split(',');const list=txs.filter(t=>t.admin===adm&&sf.includes(getStatus(t.id)));if(!list.length){alert('ไม่มีรายการ');return;}dlCSV(buildCSV(list,adm),`audit_${adm}_${fD(new Date()).replace(/\//g,'-')}.csv`);}
-function exportAll(){const sf=(document.getElementById('exp-status')?.value||'fail').split(',');[...new Set(txs.map(t=>t.admin).filter(Boolean))].forEach((adm,i)=>{const list=txs.filter(t=>t.admin===adm&&sf.includes(getStatus(t.id)));if(!list.length) return;setTimeout(()=>dlCSV(buildCSV(list,adm),`audit_${adm}_${fD(new Date()).replace(/\//g,'-')}.csv`),i*200);});}
-function exportSelected(){const sel=[...selRows];if(!sel.length){alert('กรุณาเลือกรายการก่อน');return;}const byAdm={};sel.forEach(id=>{const t=txs.find(x=>x.id===id);if(!t) return;const a=t.admin||'?';if(!byAdm[a]) byAdm[a]=[];byAdm[a].push(t);});Object.entries(byAdm).forEach(([adm,list],i)=>{setTimeout(()=>dlCSV(buildCSV(list,adm),`audit_sel_${adm}_${fD(new Date()).replace(/\//g,'-')}.csv`),i*200);});}
 
+async function buildXLSX(list, adm){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('⏳ โหลด ExcelJS อยู่ กรุณารอสักครู่...');
+    await new Promise(r=>setTimeout(r,1500));
+  }
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Slip Audit System';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('รายงาน', { views:[{state:'frozen',ySplit:4}] });
+
+  const aud = document.getElementById('auditor')?.value||settings.auditorName||'';
+  const now = new Date();
+  const dateStr = fD(now)+' '+now.toTimeString().slice(0,5);
+
+  // ── Styles ──
+  const titleFont  = {name:'Arial',size:15,bold:true,color:{argb:'FFFFFFFF'}};
+  const metaFont   = {name:'Arial',size:9,color:{argb:'FFCCCCCC'}};
+  const hdrFont    = {name:'Arial',size:10,bold:true,color:{argb:'FFFFFFFF'}};
+  const bodyFont   = {name:'Arial',size:9};
+  const dateFont   = {name:'Arial',size:10,bold:true,color:{argb:'FFF5C518'}};
+  const titleFill  = {type:'pattern',pattern:'solid',fgColor:{argb:'FF0F3460'}};
+  const hdrFill    = {type:'pattern',pattern:'solid',fgColor:{argb:'FF1A1A2E'}};
+  const dateFill   = {type:'pattern',pattern:'solid',fgColor:{argb:'FF16213E'}};
+  const oddFill    = {type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFFFF'}};
+  const evenFill   = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF8F9FA'}};
+  const failFill   = {type:'pattern',pattern:'solid',fgColor:{argb:'FFFDECEA'}};
+  const partFill   = {type:'pattern',pattern:'solid',fgColor:{argb:'FFFFF8E1'}};
+  const okFill     = {type:'pattern',pattern:'solid',fgColor:{argb:'FFE8F5E9'}};
+  const thinBorder = {style:'thin',color:{argb:'FFD0D0D0'}};
+  const bord       = {top:thinBorder,bottom:thinBorder,left:thinBorder,right:thinBorder};
+  const centerMid  = {horizontal:'center',vertical:'middle'};
+  const leftMid    = {horizontal:'left',vertical:'middle',wrapText:false};
+  const wrapMid    = {horizontal:'left',vertical:'middle',wrapText:true};
+
+  // ── Column definitions ──
+  ws.columns = [
+    {key:'date',    width:13},
+    {key:'time',    width:9},
+    {key:'admtime', width:11},
+    {key:'delay',   width:8},
+    {key:'account', width:24},
+    {key:'amount',  width:11},
+    {key:'admin',   width:9},
+    {key:'status',  width:10},
+    {key:'field',   width:10},
+    {key:'stime',   width:9},
+    {key:'samt',    width:9},
+    {key:'srecv',   width:24},
+    {key:'note',    width:40},
+  ];
+
+  // ── Row 1: Title ──
+  ws.mergeCells('A1:M1');
+  const r1 = ws.getRow(1); r1.height = 34;
+  const c1 = ws.getCell('A1');
+  c1.value = `หลักฐานรายการผิดปกติ — แอดมิน: ${adm}`;
+  c1.font = titleFont; c1.fill = titleFill;
+  c1.alignment = {horizontal:'center',vertical:'middle'};
+
+  // ── Row 2: Meta ──
+  ws.mergeCells('A2:M2');
+  const r2 = ws.getRow(2); r2.height = 18;
+  const c2 = ws.getCell('A2');
+  c2.value = `วันที่รายงาน: ${dateStr}     ผู้ตรวจ: ${aud||'—'}`;
+  c2.font = metaFont; c2.fill = titleFill;
+  c2.alignment = {horizontal:'center',vertical:'middle'};
+
+  // ── Row 3: blank ──
+  ws.getRow(3).height = 6;
+  ws.mergeCells('A3:M3');
+  ws.getCell('A3').fill = titleFill;
+
+  // ── Row 4: Headers ──
+  const HEADERS = ['วันที่','เวลาฝาก','เวลาแอดมินทำ','ล่าช้า\n(นาที)','บัญชีปลายทาง','จำนวนเงิน\n(บาท)','แอดมิน','สถานะ','หัวข้อ\nที่ผิด','สลิป\nเวลา','สลิป\nจำนวน','สลิป\nผู้รับ','หมายเหตุ'];
+  const r4 = ws.getRow(4); r4.height = 36;
+  HEADERS.forEach((h,i)=>{
+    const c = r4.getCell(i+1);
+    c.value = h; c.font = hdrFont; c.fill = hdrFill;
+    c.alignment = {horizontal:'center',vertical:'middle',wrapText:true};
+    c.border = bord;
+  });
+
+  // ── Data ──
+  const byDate = {};
+  list.forEach(t=>{
+    const d = t.time.split(' ')[0]||'?';
+    if(!byDate[d]) byDate[d] = [];
+    byDate[d].push(t);
+  });
+
+  let rowNum = 5, rowCount = 0;
+  const STATUS_LABEL = {ok:'✅ ผ่าน',fail:'❌ ผิดปกติ',partial:'⚠️ บางส่วน',pending:'⬜ รอตรวจ'};
+
+  for(const [date, dtxs] of Object.entries(byDate)){
+    // Date section row
+    ws.mergeCells(`A${rowNum}:M${rowNum}`);
+    const dr = ws.getRow(rowNum); dr.height = 22;
+    const dc = ws.getCell(`A${rowNum}`);
+    dc.value = `  📅  ${date}   (${dtxs.length} รายการ)`;
+    dc.font = dateFont; dc.fill = dateFill;
+    dc.alignment = {vertical:'middle'};
+    dc.border = {top:{style:'medium',color:{argb:'FFF5C518'}},bottom:{style:'medium',color:{argb:'FFF5C518'}},left:{style:'medium',color:{argb:'FFF5C518'}},right:{style:'medium',color:{argb:'FFF5C518'}}};
+    rowNum++;
+
+    dtxs.forEach((t, ti)=>{
+      const chk = chks[t.id]||{};
+      const fail = ['time','amt','recv'].filter(f=>chk[f]==='fail').map(f=>({time:'เวลา',amt:'จำนวน',recv:'ผู้รับ'})[f]).join(' | ');
+      const status = getStatus(t.id);
+      const delay = calcDelay(t);
+
+      const rowFill = status==='fail'?failFill : status==='partial'?partFill : status==='ok'?okFill : (ti%2===0?oddFill:evenFill);
+      const depTime = t.time.split(' ')[1]||'';
+      const admTime = (t.adminTime||'').split(' ')[1]||(t.adminTime||'');
+
+      const vals = [
+        t.time.split(' ')[0]||'',   // วันที่
+        depTime,                      // เวลาฝาก
+        admTime,                      // เวลาแอดมินทำ
+        delay===''?'':Number(delay),  // ล่าช้า
+        t.account,                    // บัญชีปลายทาง
+        parseFloat(t.amount)||0,      // จำนวนเงิน
+        t.admin,                      // แอดมิน
+        STATUS_LABEL[status]||status, // สถานะ
+        fail,                         // หัวข้อที่ผิด
+        chk.sTime||'',                // สลิป-เวลา
+        chk.sAmt?parseFloat(chk.sAmt)||chk.sAmt:'', // สลิป-จำนวน
+        chk.sRecv||'',                // สลิป-ผู้รับ
+        chk.note||'',                 // หมายเหตุ
+      ];
+
+      const row = ws.getRow(rowNum);
+      row.height = 18;
+      vals.forEach((v,i)=>{
+        const c = row.getCell(i+1);
+        c.value = v; c.fill = rowFill; c.border = bord;
+        // Column-specific styles
+        if(i===3||i===5||i===9||i===10){ // numeric
+          c.alignment = centerMid;
+          if(i===5||i===10) c.numFmt = '#,##0.00';
+          if(i===3&&typeof v==='number'){
+            if(v>30) c.font={name:'Arial',size:9,bold:true,color:{argb:'FFC62828'}};
+            else if(v>10) c.font={name:'Arial',size:9,color:{argb:'FFE65100'}};
+            else c.font={...bodyFont};
+          } else { c.font={...bodyFont}; }
+        } else if(i===12){ c.alignment=wrapMid; c.font={...bodyFont}; }
+        else { c.alignment=leftMid; c.font={...bodyFont}; }
+        // Status color
+        if(i===7){
+          if(status==='ok') c.font={name:'Arial',size:9,bold:true,color:{argb:'FF2E7D32'}};
+          else if(status==='fail') c.font={name:'Arial',size:9,bold:true,color:{argb:'FFC62828'}};
+          else if(status==='partial') c.font={name:'Arial',size:9,bold:true,color:{argb:'FFE65100'}};
+          else c.font={...bodyFont};
+          c.alignment = centerMid;
+        }
+        // Field highlight
+        if(i===8&&v) c.font={name:'Arial',size:9,bold:true,color:{argb:'FFE94560'}};
+      });
+      rowNum++; rowCount++;
+    });
+  }
+
+  // ── Summary row ──
+  ws.mergeCells(`A${rowNum}:M${rowNum}`);
+  const sr = ws.getRow(rowNum); sr.height = 22;
+  const sc = ws.getCell(`A${rowNum}`);
+  sc.value = `  รวมทั้งหมด: ${rowCount} รายการ`;
+  sc.font = hdrFont; sc.fill = hdrFill;
+  sc.alignment = {vertical:'middle'};
+
+  return wb;
+}
+
+async function dlXLSX(wb, fn){
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = fn; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportOneAdmin(adm){
+  const sf=(document.getElementById('exp-status')?.value||'fail').split(',');
+  const list=txs.filter(t=>t.admin===adm&&sf.includes(getStatus(t.id)));
+  if(!list.length){showToast('ไม่มีรายการ');return;}
+  showToast('⏳ กำลังสร้างไฟล์ Excel...');
+  const wb = await buildXLSX(list, adm);
+  await dlXLSX(wb, `audit_${adm}_${fD(new Date()).replace(/\//g,'-')}.xlsx`);
+}
+
+async function exportAll(){
+  const sf=(document.getElementById('exp-status')?.value||'fail').split(',');
+  const admins=[...new Set(txs.map(t=>t.admin).filter(Boolean))];
+  showToast(`⏳ สร้าง Excel ${admins.length} ไฟล์...`);
+  for(let i=0;i<admins.length;i++){
+    const adm=admins[i];
+    const list=txs.filter(t=>t.admin===adm&&sf.includes(getStatus(t.id)));
+    if(!list.length) continue;
+    const wb = await buildXLSX(list, adm);
+    await dlXLSX(wb, `audit_${adm}_${fD(new Date()).replace(/\//g,'-')}.xlsx`);
+    await new Promise(r=>setTimeout(r,300));
+  }
+  showToast('✅ Export เสร็จทั้งหมด');
+}
+
+async function exportSelected(){
+  const sel=[...selRows];
+  if(!sel.length){showToast('กรุณาเลือกรายการก่อน');return;}
+  const byAdm={};
+  sel.forEach(id=>{const t=txs.find(x=>x.id===id);if(!t) return;const a=t.admin||'?';if(!byAdm[a]) byAdm[a]=[];byAdm[a].push(t);});
+  showToast(`⏳ สร้าง Excel...`);
+  for(const [adm,list] of Object.entries(byAdm)){
+    const wb = await buildXLSX(list, adm);
+    await dlXLSX(wb, `audit_sel_${adm}_${fD(new Date()).replace(/\//g,'-')}.xlsx`);
+    await new Promise(r=>setTimeout(r,300));
+  }
+  showToast('✅ Export เสร็จ');
+}
+
+// Keep dlCSV for backward compat (unused)
 // ---- Settings ----
 function renderBankSlots(){document.getElementById('bank-slots').innerHTML=settings.banks.map((b,i)=>`<div class="bank-slot"><div style="font-family:var(--mono);font-size:10px;color:var(--accent);font-weight:700;margin-bottom:6px">บัญชีที่ ${i+1}</div><div class="bsf"><div><div class="form-label" style="margin-bottom:3px">ธนาคาร</div><select class="field" id="bk-${i}" style="width:100%"><option value="">เลือก</option>${['SCB','KBANK','BBL','KTB','TTB','BAY','UOB','CIMBT','GSB'].map(bk=>`<option value="${bk}" ${b.bank===bk?'selected':''}>${bk}</option>`).join('')}</select></div><div><div class="form-label" style="margin-bottom:3px">เลขบัญชี</div><input type="text" class="field" id="bn-${i}" value="${esc(b.number)}" placeholder="000-0-00000-0" style="width:100%;font-family:var(--mono)"></div><div style="grid-column:span 2"><div class="form-label" style="margin-bottom:3px">ชื่อเจ้าของบัญชี</div><input type="text" class="field" id="bo-${i}" value="${esc(b.name)}" placeholder="ชื่อ-นามสกุล" style="width:100%"></div></div></div>`).join('');}
 function renderAdminSettings(){const el=document.getElementById('adm-list');if(!settings.admins.length){el.innerHTML='<div style="color:var(--muted);font-size:11px;font-family:var(--mono);padding:6px">ยังไม่มีแอดมิน</div>';return;}el.innerHTML=settings.admins.map((a,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 9px;background:var(--bg);border-radius:4px;margin-bottom:5px"><span style="font-family:var(--mono);font-size:12px;color:var(--blue)">👤 ${esc(a)}</span><button class="btn btn-r btn-sm" onclick="removeAdmin(${i})">✕</button></div>`).join('');if(document.getElementById('auditor')) document.getElementById('auditor').value=settings.auditorName||'';}
