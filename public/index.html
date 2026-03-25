@@ -180,6 +180,7 @@ input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:po
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <header class="header">
@@ -409,7 +410,168 @@ let filteredTxs=[],page=1;
 const PAGE=50;
 let slipCtr=1;
 
-function init(){loadLS();renderBankSlots();renderAdminSettings();updateAll();}
+
+/* ============================================================
+   SUPABASE SYNC
+   ============================================================ */
+const SUPA_URL = 'https://eefbefvmykampilfseqk.supabase.co';
+const SUPA_KEY = 'sb_publishable_lMDon4Sex9m-M-XB9-8ldw_dyxBWgez';
+let sb = null;
+let _syncPending = false;
+let _syncTimer = null;
+
+function initSupabase(){
+  try{
+    sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+    console.log('[DB] Supabase connected');
+  }catch(e){
+    console.warn('[DB] Supabase init failed:', e);
+    sb = null;
+  }
+}
+
+// Debounced save — wait 1.5s after last change before syncing
+function saveLS(){
+  // Always save to localStorage first (instant, no network)
+  try{
+    localStorage.setItem('a3_txs', JSON.stringify(txs));
+    localStorage.setItem('a3_chks', JSON.stringify(chks));
+    const meta = slips.map(s=>({id:s.id,name:s.name,txId:s.txId||null,type:s.type||'upload',url:s.url||null,dataUrl:''}));
+    localStorage.setItem('a3_slips', JSON.stringify(meta));
+    slips.forEach(s=>{if(s.type!=='url'&&s.dataUrl) try{sessionStorage.setItem('si3_'+s.id,s.dataUrl);}catch(e){}});
+    localStorage.setItem('a3_sel', JSON.stringify([...selRows]));
+  }catch(e){}
+  // Then debounce Supabase sync
+  if(!sb) return;
+  if(_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(syncToSupabase, 1500);
+}
+
+async function syncToSupabase(){
+  if(!sb || _syncPending) return;
+  _syncPending = true;
+  showSyncIndicator('syncing');
+  try{
+    // Upsert all transactions
+    if(txs.length){
+      const txRows = txs.map(t=>({
+        id: String(t.id),
+        time: t.time||'', raw_time: t.rawTime||'',
+        account: t.account||'', amount: parseFloat(t.amount)||0,
+        admin: t.admin||'', admin_time: t.adminTime||'',
+        sender: t.sender||'', slip_url: t.slipUrl||'', note: t.note||''
+      }));
+      const {error:te} = await sb.from('transactions').upsert(txRows, {onConflict:'id'});
+      if(te) throw te;
+    }
+    // Upsert all checks
+    const chkRows = Object.entries(chks).map(([txId,c])=>({
+      tx_id: String(txId),
+      time_result: c.time||null, amt_result: c.amt||null, recv_result: c.recv||null,
+      s_date: c.sDate||null, s_time: c.sTime||null, s_amt: c.sAmt||null,
+      s_sender: c.sSender||null, s_recv: c.sRecv||null, note: c.note||null
+    }));
+    if(chkRows.length){
+      const {error:ce} = await sb.from('checks').upsert(chkRows, {onConflict:'tx_id'});
+      if(ce) throw ce;
+    }
+    // Upsert slip metadata (no image data — too large for DB)
+    const slipRows = slips.map(s=>({
+      id: s.id, name: s.name||'', type: s.type||'upload',
+      url: s.url||null, tx_id: s.txId?String(s.txId):null,
+      storage_path: ''
+    }));
+    if(slipRows.length){
+      const {error:se} = await sb.from('slips').upsert(slipRows, {onConflict:'id'});
+      if(se) throw se;
+    }
+    showSyncIndicator('ok');
+  }catch(err){
+    console.warn('[DB] Sync error:', err);
+    showSyncIndicator('error');
+  }finally{
+    _syncPending = false;
+  }
+}
+
+async function loadFromSupabase(){
+  if(!sb) return false;
+  showSyncIndicator('loading');
+  try{
+    const {data:txData, error:te} = await sb.from('transactions').select('*').order('time', {ascending:false});
+    if(te) throw te;
+    if(!txData || txData.length === 0){ showSyncIndicator('ok'); return false; }
+
+    const {data:chkData} = await sb.from('checks').select('*');
+    const {data:slipData} = await sb.from('slips').select('*');
+
+    // Map to app format
+    txs = txData.map(r=>({
+      id: r.id, time: r.time, rawTime: r.raw_time,
+      account: r.account, amount: r.amount, admin: r.admin,
+      adminTime: r.admin_time, sender: r.sender||'',
+      slipUrl: r.slip_url||null, note: r.note||''
+    }));
+
+    chks = {};
+    (chkData||[]).forEach(r=>{
+      chks[r.tx_id] = {
+        time: r.time_result, amt: r.amt_result, recv: r.recv_result,
+        sDate: r.s_date, sTime: r.s_time, sAmt: r.s_amt,
+        sSender: r.s_sender, sRecv: r.s_recv, note: r.note
+      };
+    });
+
+    // Restore slips metadata + dataUrl from sessionStorage
+    slipCtr = 1;
+    slips = (slipData||[]).map(r=>{
+      const id = r.id;
+      if(id >= slipCtr) slipCtr = id + 1;
+      return {
+        id, name: r.name, type: r.type||'upload',
+        url: r.url||null, txId: r.tx_id||null,
+        dataUrl: r.type!=='url' ? (sessionStorage.getItem('si3_'+id)||'') : null
+      };
+    });
+
+    // Also save to localStorage for offline fallback
+    try{
+      localStorage.setItem('a3_txs', JSON.stringify(txs));
+      localStorage.setItem('a3_chks', JSON.stringify(chks));
+    }catch(e){}
+
+    showSyncIndicator('ok');
+    return true;
+  }catch(err){
+    console.warn('[DB] Load error:', err);
+    showSyncIndicator('error');
+    return false;
+  }
+}
+
+// ── Sync indicator UI ──
+function showSyncIndicator(state){
+  let el = document.getElementById('sync-indicator');
+  if(!el){ el=document.createElement('div'); el.id='sync-indicator'; el.style.cssText='position:fixed;bottom:16px;left:16px;font-family:var(--mono);font-size:11px;padding:5px 12px;border-radius:4px;z-index:999;transition:all .3s;pointer-events:none'; document.body.appendChild(el); }
+  const states = {
+    syncing: ['rgba(245,197,24,.9)','#000','⏫ กำลัง sync...'],
+    ok:      ['rgba(34,197,94,.15)','var(--green)','✅ sync แล้ว'],
+    error:   ['rgba(239,68,68,.15)','var(--red)','❌ sync ไม่ได้'],
+    loading: ['rgba(59,130,246,.15)','var(--blue)','⬇️ โหลดจาก cloud...'],
+  };
+  const [bg,color,txt] = states[state]||states.ok;
+  el.style.background=bg; el.style.color=color; el.textContent=txt;
+  if(state==='ok') setTimeout(()=>{if(el) el.style.opacity='0';},3000);
+  else el.style.opacity='1';
+}
+
+async function init(){
+  initSupabase();
+  // Try loading from Supabase first; fall back to localStorage
+  const loaded = await loadFromSupabase();
+  if(!loaded) loadLS();
+  renderBankSlots();renderAdminSettings();updateAll();
+}
 
 function loadLS(){
   try{
